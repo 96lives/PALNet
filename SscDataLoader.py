@@ -1228,7 +1228,17 @@ class NYUv2Dataset(torch.utils.data.Dataset):
             target_name = os.path.join(save_dir, os.path.basename(file_name) + '_gt.pt')
             torch.save(target_coords, target_name)
 
+            # # Visualize
+            # import open3d as o3d
+            # input_coords_vec = o3d.Vector3dVector(input_coords)
+            # input_pcd = o3d.geometry.PointCloud()
+            # input_pcd.points = input_coords_vec
 
+            # target_coords_vec = o3d.Vector3dVector(target_coords)
+            # target_pcd = o3d.geometry.PointCloud()
+            # target_pcd.points = target_coords_vec
+            # o3d.visualization.draw_geometries([input_pcd])
+            # o3d.visualization.draw_geometries([target_pcd])
 
 
 def one_hot_embedding(labels, num_classes):
