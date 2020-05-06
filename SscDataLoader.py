@@ -16,9 +16,12 @@ import torch.utils.data
 # from scipy import misc
 import imageio
 from torchvision import transforms
+import torch
+from tqdm import tqdm
+import os
 # import datetime
-""" 
-1.注意 Channel first 和 Channel last 
+"""
+1.注意 Channel first 和 Channel last
 2.注意 D H W 和 W H D 的顺序，
 
 D H W是按照网络中3D_conv的顺序, 本文件中，除了网络的输入输出部分是D H W，其余均按照 W H D。
@@ -188,6 +191,23 @@ class NYUv2Dataset(torch.utils.data.Dataset):
             #     return voxels.T, target_lr.T, one_hot_target_vox.T, _name + '.png'  # C D H W, for Conv3d
 
             depth = depth.reshape((1,) + depth.shape)
+
+            # DS Modified
+            import open3d as o3d
+            input_coords = np.nonzero(voxels)
+            input_coords = np.stack([input_coords[0], input_coords[1], input_coords[2]], axis=1)
+            input_coords_vec = o3d.Vector3dVector(input_coords)
+            input_pcd = o3d.geometry.PointCloud()
+            input_pcd.points = input_coords_vec
+
+            target_coords = np.nonzero(np.logical_and(target_hr!=0, target_hr!=255))
+            target_coords = np.stack([target_coords[0], target_coords[1], target_coords[2]], axis=1)
+            target_coords_vec = o3d.Vector3dVector(target_coords)
+            target_pcd = o3d.geometry.PointCloud()
+            target_pcd.points = target_coords_vec
+            o3d.visualization.draw_geometries([input_pcd, target_pcd])
+            o3d.visualization.draw_geometries([input_pcd])
+            o3d.visualization.draw_geometries([target_pcd])
 
             # rgb = self._read_rgb(_name + '.jpg', 480, 640)  # (h=image_height, w=image_width, 3)
             # rgb_tesnor = self.transforms_rgb(rgb)  # (C x H x W) = (3, 480, 640)
@@ -1188,6 +1208,27 @@ class NYUv2Dataset(torch.utils.data.Dataset):
         # del rgb_vox, _x, _y, _z, xyz_rgb, ply_data, ply_head
         print('Saved-->{}'.format(ply_filename))
 
+    def convert2tensor(self, save_dir, downsample=4):
+        os.makedirs(save_dir, exist_ok=True)
+        for file_name in tqdm(self.filepaths):
+            file_name = file_name[:-4]
+            depth = self._read_depth(file_name + '.png', 480, 640)  # (h, w)
+            vox_origin, cam_pose, rle = self._read_rle(file_name + '.bin')
+            target_hr = self._rle2voxel(rle, file_name + '.bin') if self.mode is not 'PREDICT' else None
+            binary_vox, _, _ = self._depth2voxel(depth, cam_pose, vox_origin, unit=voxel_UNIT)
+            input_coords = np.nonzero(binary_vox)
+            input_coords = np.stack([input_coords[0], input_coords[1], input_coords[2]], axis=1) // downsample
+            input_coords = torch.Tensor(input_coords)
+            input_name = os.path.join(save_dir, os.path.basename(file_name) + '_input.pt')
+            torch.save(input_coords, input_name)
+
+            target_coords = np.nonzero(np.logical_and(target_hr != 0, target_hr != 255))
+            target_coords = np.stack([target_coords[0], target_coords[1], target_coords[2]], axis=1) // downsample
+            target_coords = torch.Tensor(target_coords)
+            target_name = os.path.join(save_dir, os.path.basename(file_name) + '_gt.pt')
+            torch.save(target_coords, target_name)
+
+
 
 
 def one_hot_embedding(labels, num_classes):
@@ -1241,20 +1282,32 @@ def GetB(gray):
     else:
         return 256 - (gray - 63) * 4
 
+
 if __name__ == '__main__':
     # ---- Data loader
-    data_dir = '/home/jie/fastDATA/NYUCADvalidate40-lr-ply--depth2stream-nonempty2-color'
-    data_loader = torch.utils.data.DataLoader(
-        dataset=SuncgDataset(data_dir, 'TRAIN', encoding='BINARY', downsample=1),
-        batch_size=1,
-        shuffle=False,
-        num_workers=2
-    )
-    import datetime
-    time1 = datetime.datetime.now()
+    # data_dir = '/home/jie/fastDATA/NYUCADvalidate40-lr-ply--depth2stream-nonempty2-color'
+    # train_data_dir containes *.png files and .bin files
+    train_data_dir = './data/NYUCADtrain'
+    train_dataset = NYUv2Dataset(train_data_dir, 'TRAIN', encoding='BINARY', downsample=1)
+    train_dataset.convert2tensor('./data/nyu_train', downsample=4)
+    print("Train conversion finished!")
 
-    # ---- LR
-    for step, (voxel_rgbd, target_lr, _filename) in enumerate(data_loader):
-        # rgb_vox.T, target_vox.T, one_hot_target_vox.T, _name + '.png'
-        print('step:', step, voxel_rgbd.shape, len(_filename))
-    # print(datetime.datetime.now() - time1)
+    print("Eval conversion finished!")
+    test_data_dir = './data/NYUCADtest'
+    test_dataset = NYUv2Dataset(test_data_dir, 'TRAIN', encoding='BINARY', downsample=1)
+    test_dataset.convert2tensor('./data/nyu_test', downsample=4)
+    print("Eval conversion finished!")
+    # data_loader = torch.utils.data.DataLoader(
+    #     dataset=NYUv2Dataset(data_dir, 'TRAIN', encoding='BINARY', downsample=1),
+    #     batch_size=1,
+    #     shuffle=False,
+    #     num_workers=0
+    # )
+    # import datetime
+    # time1 = datetime.datetime.now()
+
+    # # ---- LR
+    # for step, (voxel_rgbd, target_lr, _filename) in enumerate(data_loader):
+    #     # rgb_vox.T, target_vox.T, one_hot_target_vox.T, _name + '.png'
+    #     print('step:', step, voxel_rgbd.shape, len(_filename))
+    # # print(datetime.datetime.now() - time1)
